@@ -5,19 +5,37 @@ import requests
 from datetime import datetime, timedelta
 
 # 配置
-# Gamma API 用于获取市场元数据 (无需鉴权)
 GAMMA_API_URL = "https://gamma-api.polymarket.com/events"
-# CLOB API 用于获取订单簿和成交 (部分无需鉴权)
 CLOB_API_URL = "https://clob.polymarket.com"
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 MIN_TRADE_SIZE = 5000  # 最小监控金额 (USD)
 LOOKBACK_MINUTES = 15  # 扫描过去多少分钟的数据
 
+def send_discord_alert(embeds):
+    """发送 Discord 警报"""
+    if not DISCORD_WEBHOOK_URL:
+        print("Error: DISCORD_WEBHOOK_URL not set.")
+        return
+
+    data = {
+        "username": "Anomaly Monitor",
+        "avatar_url": "https://polymarket.com/favicon.ico",
+        "embeds": embeds
+    }
+    
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, json=data)
+        if response.status_code == 204:
+            print("Discord alert sent successfully.")
+        else:
+            print(f"Failed to send Discord alert: {response.status_code} {response.text}")
+    except Exception as e:
+        print(f"Exception sending Discord alert: {e}")
+
 def get_top_markets():
     """获取当前热门市场 ID"""
     try:
-        # 获取按交易量排序的热门事件
         params = {
             "limit": 10,
             "active": "true",
@@ -33,68 +51,107 @@ def get_top_markets():
         market_ids = []
         for event in events:
             for market in event.get('markets', []):
-                market_ids.append({
-                    "id": market['id'],
-                    "question": market['question'],
-                    "slug": event.get('slug', 'unknown')
-                })
+                # 提取 clobTokenIds 中的第一个作为主 token_id
+                token_ids = json.loads(market.get('clobTokenIds', '[]'))
+                if token_ids:
+                    market_ids.append({
+                        "id": token_ids[0], # 使用 CLOB token ID
+                        "question": market['question'],
+                        "slug": event.get('slug', 'unknown'),
+                        "outcomes": json.loads(market.get('outcomes', '[]'))
+                    })
         return market_ids
     except Exception as e:
         print(f"Exception fetching markets: {e}")
         return []
 
-def get_recent_trades_for_market(market_id):
-    """获取特定市场的最近成交"""
-    # 注意：CLOB API 的 /trades 端点可能需要鉴权或有特定参数
-    # 这里我们尝试使用公共的 last_trade_price 或类似端点，或者模拟前端请求
-    # 由于 CLOB API 严格限制，我们改用 Gamma API 的 activity 端点或类似公共数据
-    # 为简化演示，这里模拟一个数据源，实际生产建议申请 API Key
-    
-    # 备选方案：使用 Gamma API 的 /markets/{id} 获取最新价格和 volume 变化
-    # 或者使用 CLOB 的 /book 获取订单簿深度变化
-    
+def check_whale_orders(market):
+    """检测巨鲸挂单"""
     url = f"{CLOB_API_URL}/book"
-    params = {"token_id": market_id}
+    params = {"token_id": market['id']}
     
     try:
         response = requests.get(url, params=params)
         if response.status_code == 200:
             book = response.json()
-            # 简单分析：如果买单墙突然出现大额挂单
-            return book
-    except:
-        pass
-    return None
+            anomalies = []
+            
+            # 检查买单 (Bids)
+            for bid in book.get('bids', []):
+                price = float(bid['price'])
+                size = float(bid['size'])
+                value = price * size
+                if value > MIN_TRADE_SIZE:
+                    anomalies.append({
+                        "type": "Whale Bid (Buy Wall)",
+                        "price": price,
+                        "size": size,
+                        "value": value,
+                        "side": "YES" # 简化假设
+                    })
+            
+            # 检查卖单 (Asks)
+            for ask in book.get('asks', []):
+                price = float(ask['price'])
+                size = float(ask['size'])
+                value = price * size
+                if value > MIN_TRADE_SIZE:
+                    anomalies.append({
+                        "type": "Whale Ask (Sell Wall)",
+                        "price": price,
+                        "size": size,
+                        "value": value,
+                        "side": "YES" # 简化假设
+                    })
+            
+            return anomalies
+    except Exception as e:
+        print(f"Error checking order book for {market['question']}: {e}")
+    return []
 
 def scan_markets():
     """扫描市场异动"""
     print(f"Scanning top markets for anomalies...")
     markets = get_top_markets()
-    anomalies = []
+    all_anomalies = []
+    
+    print(f"Found {len(markets)} markets to scan.")
     
     for market in markets:
-        # 这里简化逻辑：实际应调用 /trades 接口，但因鉴权问题，
-        # 我们改为监控 Gamma API 返回的 volume 字段变化（需持久化存储对比，此处仅做演示）
-        # 为了演示效果，我们模拟一个检测逻辑
+        print(f"Checking: {market['question'][:30]}...")
+        anomalies = check_whale_orders(market)
         
-        # 真实逻辑：
-        # 1. 获取该市场过去 10 分钟的成交记录
-        # 2. 筛选 > $5000 的单子
-        pass
+        for anomaly in anomalies:
+            embed = {
+                "title": f"🚨 {anomaly['type']} Detected!",
+                "description": f"**Market:** [{market['question']}](https://polymarket.com/event/{market['slug']})\n**Value:** ${anomaly['value']:,.2f}\n**Price:** {anomaly['price']}\n**Size:** {anomaly['size']:,.0f}",
+                "color": 16711680 if "Ask" in anomaly['type'] else 65280, # Red for Ask, Green for Bid
+                "footer": {"text": "Polymarket Anomaly Monitor"},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            all_anomalies.append(embed)
+            
+        # 避免 API 速率限制
+        time.sleep(0.2)
         
-    # 由于无法在无 Key 情况下直接获取全市场实时 Trade 流，
-    # 建议用户在部署时申请免费的 Polymarket API Key 填入 Secrets
-    
-    print("Scan complete. (Note: Real-time trade scanning requires API Key for CLOB endpoint)")
-    return anomalies
+    if all_anomalies:
+        print(f"Found {len(all_anomalies)} anomalies. Sending alerts...")
+        # 分批发送，避免 Discord 限制
+        for i in range(0, len(all_anomalies), 10):
+            batch = all_anomalies[i:i+10]
+            send_discord_alert(batch)
+    else:
+        print("No anomalies found.")
+        # 发送心跳包 (可选，每天发送一次或每次都发)
+        # 这里设置为每次都发，以便用户确认脚本在运行
+        heartbeat_embed = [{
+            "title": "💓 Monitor Heartbeat",
+            "description": f"Scanned {len(markets)} markets. No whale orders > ${MIN_TRADE_SIZE} detected.",
+            "color": 3447003, # Blue
+            "footer": {"text": "System is running normally"},
+            "timestamp": datetime.utcnow().isoformat()
+        }]
+        send_discord_alert(heartbeat_embed)
 
 if __name__ == "__main__":
-    # 这是一个占位符运行，确保环境正常
-    print("Starting Anomaly Monitor Scan...")
-    markets = get_top_markets()
-    print(f"Successfully fetched {len(markets)} active markets from Gamma API.")
-    if markets:
-        print(f"Top market: {markets[0]['question']}")
-    
-    # 提示用户
-    print("\n[INFO] To enable full trade scanning, please add POLYMARKET_API_KEY to GitHub Secrets.")
+    scan_markets()
