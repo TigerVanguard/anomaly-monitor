@@ -144,14 +144,14 @@ def scan_markets():
         print("No anomalies found.")
         # 发送心跳包 (可选，每天发送一次或每次都发)
         # 这里设置为每次都发，以便用户确认脚本在运行
-        heartbeat_embed = [{
-            "title": "💓 Monitor Heartbeat",
-            "description": f"Scanned {len(markets)} markets. No whale orders > ${MIN_TRADE_SIZE} detected.",
-            "color": 3447003, # Blue
-            "footer": {"text": "System is running normally"},
-            "timestamp": datetime.utcnow().isoformat()
-        }]
-        send_discord_alert(heartbeat_embed)
+        # heartbeat_embed = [{
+        #    "title": "💓 Monitor Heartbeat",
+        #    "description": f"Scanned {len(markets)} markets. No whale orders > ${MIN_TRADE_SIZE} detected.",
+        #    "color": 3447003, # Blue
+        #    "footer": {"text": "System is running normally"},
+        #    "timestamp": datetime.utcnow().isoformat()
+        # }]
+        # send_discord_alert(heartbeat_embed)
 
 if __name__ == "__main__":
     scan_markets()
