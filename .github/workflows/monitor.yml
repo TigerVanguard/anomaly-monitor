@@ -2,7 +2,7 @@ name: Anomaly Monitor Cron
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # 每 10 分钟运行一次
+    - cron: '3/10 * * * *'  # 每 10 分钟运行一次，从第 3 分钟开始 (错峰运行)
   workflow_dispatch:      # 允许手动触发
 
 jobs:
@@ -16,6 +16,16 @@ jobs:
         with:
           python-version: '3.9'
           
+      # 1. 恢复缓存 (在运行脚本之前)
+      - name: Restore seen orders cache
+        id: restore-cache
+        uses: actions/cache/restore@v3
+        with:
+          path: seen_orders.json
+          key: seen-orders-${{ github.run_id }} # 总是尝试恢复最新的，这里 key 只是占位
+          restore-keys: |
+            seen-orders-
+          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -25,3 +35,12 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python monitor.py
+
+      # 2. 保存缓存 (在运行脚本之后)
+      # 注意：GitHub Actions Cache 是不可变的，所以每次必须用新的 key
+      - name: Save seen orders cache
+        if: always() # 即使脚本报错也要尝试保存（视情况而定，通常成功才保存）
+        uses: actions/cache/save@v3
+        with:
+          path: seen_orders.json
+          key: seen-orders-${{ github.run_id }}
