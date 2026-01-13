@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,11 +13,54 @@ import {
   Clock,
   Search,
   Twitter,
-  Globe
+  Globe,
+  ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// 定义警报数据接口
+interface AlertData {
+  id: string;
+  time: string;
+  timestamp: string;
+  type: string;
+  message: string;
+  severity: "low" | "medium" | "high" | "critical";
+  market_question: string;
+  market_slug: string;
+  value: number;
+  price: number;
+  size: number;
+}
+
 export default function Home() {
+  const [alerts, setAlerts] = useState<AlertData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 加载真实数据
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const response = await fetch('/data/alerts.json');
+        if (response.ok) {
+          const data = await response.json();
+          setAlerts(data);
+        } else {
+          console.error("Failed to fetch alerts data");
+        }
+      } catch (error) {
+        console.error("Error fetching alerts:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAlerts();
+    // 每 60 秒轮询一次
+    const interval = setInterval(fetchAlerts, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Top Stats Row */}
@@ -30,11 +74,11 @@ export default function Home() {
         />
         <StatCard 
           title="ACTIVE ANOMALIES" 
-          value="7 DETECTED" 
-          change="+2" 
+          value={`${alerts.length} DETECTED`} 
+          change={alerts.length > 0 ? "NEW" : "0"} 
           isPositive={false}
           icon={AlertTriangle}
-          alert
+          alert={alerts.length > 0}
         />
         <StatCard 
           title="INSIDER SIGNALS" 
@@ -109,36 +153,23 @@ export default function Home() {
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
             <div className="space-y-3">
-              <AlertItem 
-                time="10:42:15"
-                type="INSIDER"
-                message="New wallet created 2h ago placed $50k bet on 'Trump vs Biden'"
-                severity="high"
-              />
-              <AlertItem 
-                time="10:38:22"
-                type="VOLUME"
-                message="Unusual volume spike detected in 'Fed Rate Cut' market"
-                severity="medium"
-              />
-              <AlertItem 
-                time="10:15:00"
-                type="PIZZA"
-                message="Pizza orders near Pentagon +240% above average"
-                severity="critical"
-              />
-              <AlertItem 
-                time="09:55:12"
-                type="WHALE"
-                message="Known whale address moved $2M to Polymarket"
-                severity="medium"
-              />
-              <AlertItem 
-                time="09:30:45"
-                type="SOCIAL"
-                message="Sentiment shift detected for 'Bitcoin ETF Approval'"
-                severity="low"
-              />
+              {loading ? (
+                <div className="text-center text-muted-foreground py-4 text-xs font-mono">Loading alerts...</div>
+              ) : alerts.length === 0 ? (
+                <div className="text-center text-muted-foreground py-4 text-xs font-mono">No active anomalies detected.</div>
+              ) : (
+                alerts.map((alert) => (
+                  <AlertItem 
+                    key={alert.id}
+                    time={alert.time}
+                    type={alert.type}
+                    message={alert.message}
+                    severity={alert.severity}
+                    marketQuestion={alert.market_question}
+                    marketSlug={alert.market_slug}
+                  />
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
@@ -197,10 +228,30 @@ export default function Home() {
           </CardHeader>
           <CardContent className="relative z-10">
             <div className="grid grid-cols-2 gap-4">
-              <StatusItem label="Pizza Watch" status="ONLINE" ping="24ms" />
-              <StatusItem label="Polyfactual AI" status="PROCESSING" ping="112ms" />
-              <StatusItem label="Hashdive" status="ONLINE" ping="45ms" />
-              <StatusItem label="Polysights" status="ONLINE" ping="32ms" />
+              <StatusItem 
+                label="Pizza Watch" 
+                status="ONLINE" 
+                ping="24ms" 
+                url="https://www.google.com/search?q=bitcoin+pizza+day" 
+              />
+              <StatusItem 
+                label="Polyfactual AI" 
+                status="PROCESSING" 
+                ping="112ms" 
+                url="https://polymarket.com" 
+              />
+              <StatusItem 
+                label="Hashdive" 
+                status="ONLINE" 
+                ping="45ms" 
+                url="https://www.google.com/search?q=blockchain+hashrate" 
+              />
+              <StatusItem 
+                label="Polysights" 
+                status="ONLINE" 
+                ping="32ms" 
+                url="https://polymarket.com/activity" 
+              />
             </div>
             
             <div className="mt-6 p-4 border border-primary/20 bg-primary/5">
@@ -247,7 +298,7 @@ function StatCard({ title, value, change, isPositive, icon: Icon, alert = false 
   );
 }
 
-function AlertItem({ time, type, message, severity }: any) {
+function AlertItem({ time, type, message, severity, marketQuestion, marketSlug }: any) {
   const severityMap = {
     low: "border-l-2 border-muted-foreground",
     medium: "border-l-2 border-yellow-500",
@@ -257,15 +308,11 @@ function AlertItem({ time, type, message, severity }: any) {
   
   const severityColor = severityMap[severity as keyof typeof severityMap] || "border-l-2 border-muted-foreground";
 
-  // 提取关键词：尝试提取单引号中的内容，如果没有则使用整条消息
-  const extractKeyword = (msg: string) => {
-    const match = msg.match(/'([^']+)'/);
-    return match ? match[1] : msg;
-  };
-
-  const keyword = extractKeyword(message);
+  // 使用 marketQuestion 作为搜索关键词，如果为空则回退到 message
+  const keyword = marketQuestion || message;
   const twitterUrl = `https://twitter.com/search?q=${encodeURIComponent(keyword)}&src=typed_query`;
   const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(keyword)}`;
+  const marketUrl = marketSlug ? `https://polymarket.com/event/${marketSlug}` : null;
 
   return (
     <div className={cn("p-3 bg-black/40 border border-border/50 hover:bg-white/5 transition-colors group", severityColor)}>
@@ -280,7 +327,15 @@ function AlertItem({ time, type, message, severity }: any) {
       </p>
       
       {/* Search Actions - Only visible on hover or if critical */}
-      <div className="flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+      <div className="flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity flex-wrap">
+        {marketUrl && (
+          <a href={marketUrl} target="_blank" rel="noopener noreferrer" title="View on Polymarket">
+            <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] bg-primary/20 text-primary hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors border border-primary/30">
+              <ExternalLink className="w-3 h-3" />
+              Market
+            </Badge>
+          </a>
+        )}
         <a href={twitterUrl} target="_blank" rel="noopener noreferrer" title="Search on Twitter">
           <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors">
             <Twitter className="w-3 h-3" />
@@ -298,10 +353,13 @@ function AlertItem({ time, type, message, severity }: any) {
   );
 }
 
-function StatusItem({ label, status, ping }: any) {
-  return (
-    <div className="flex items-center justify-between p-2 border-b border-border/50 last:border-0">
-      <span className="text-xs font-mono text-muted-foreground">{label}</span>
+function StatusItem({ label, status, ping, url }: any) {
+  const Content = () => (
+    <div className="flex items-center justify-between p-2 border-b border-border/50 last:border-0 hover:bg-white/5 transition-colors cursor-pointer">
+      <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+        {label}
+        {url && <ExternalLink className="w-3 h-3 opacity-50" />}
+      </span>
       <div className="flex items-center gap-2">
         <span className={cn(
           "text-[10px] font-bold",
@@ -311,4 +369,14 @@ function StatusItem({ label, status, ping }: any) {
       </div>
     </div>
   );
+
+  if (url) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+        <Content />
+      </a>
+    );
+  }
+
+  return <Content />;
 }

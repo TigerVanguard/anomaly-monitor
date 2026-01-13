@@ -13,6 +13,7 @@ CLOB_API_URL = "https://clob.polymarket.com"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 MIN_TRADE_SIZE = 5000  # 最小监控金额 (USD)
 SEEN_ORDERS_FILE = "seen_orders.json"
+ALERTS_DATA_FILE = "client/public/data/alerts.json"
 
 def load_seen_orders():
     """加载已处理过的订单记录"""
@@ -37,6 +38,33 @@ def clean_old_orders(seen_orders):
     cutoff_time = (datetime.utcnow() - timedelta(hours=24)).timestamp()
     cleaned = {k: v for k, v in seen_orders.items() if v > cutoff_time}
     return cleaned
+
+def load_alerts_data():
+    """加载历史警报数据"""
+    if os.path.exists(ALERTS_DATA_FILE):
+        try:
+            with open(ALERTS_DATA_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading alerts data: {e}")
+    return []
+
+def save_alerts_data(alerts):
+    """保存警报数据，只保留最近 50 条"""
+    try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(ALERTS_DATA_FILE), exist_ok=True)
+        
+        # 按时间倒序排序（新的在前）
+        alerts.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        # 只保留前 50 条
+        kept_alerts = alerts[:50]
+        
+        with open(ALERTS_DATA_FILE, 'w') as f:
+            json.dump(kept_alerts, f, indent=2)
+    except Exception as e:
+        print(f"Error saving alerts data: {e}")
 
 def generate_order_id(market_id, price, size, side):
     """生成唯一的订单 ID"""
@@ -154,6 +182,9 @@ def scan_markets():
     seen_orders = load_seen_orders()
     seen_orders = clean_old_orders(seen_orders) # 清理旧数据
     
+    # 加载历史警报数据
+    existing_alerts = load_alerts_data()
+    
     markets = get_top_markets()
     all_anomalies = []
     new_seen_count = 0
@@ -170,6 +201,7 @@ def scan_markets():
             twitter_url = f"https://twitter.com/search?q={query}&src=typed_query"
             google_url = f"https://www.google.com/search?q={query}"
             
+            # Discord Embed 格式
             embed = {
                 "title": f"🚨 {anomaly['type']} Detected!",
                 "description": (
@@ -185,6 +217,22 @@ def scan_markets():
             }
             all_anomalies.append(embed)
             
+            # 前端数据格式 (简化版)
+            frontend_alert = {
+                "id": anomaly['order_id'],
+                "time": datetime.utcnow().strftime("%H:%M:%S"),
+                "timestamp": datetime.utcnow().isoformat(),
+                "type": "WHALE", # 统一标记为 WHALE，或者细分
+                "message": f"{anomaly['type']} detected in '{market['question']}' (Value: ${anomaly['value']:,.0f})",
+                "severity": "high" if anomaly['value'] > 50000 else "medium",
+                "market_question": market['question'],
+                "market_slug": market['slug'],
+                "value": anomaly['value'],
+                "price": anomaly['price'],
+                "size": anomaly['size']
+            }
+            existing_alerts.append(frontend_alert)
+            
             # 记录到 seen_orders，值为当前时间戳
             seen_orders[anomaly['order_id']] = datetime.utcnow().timestamp()
             new_seen_count += 1
@@ -198,19 +246,12 @@ def scan_markets():
         for i in range(0, len(all_anomalies), 10):
             batch = all_anomalies[i:i+10]
             send_discord_alert(batch)
+            
+        # 保存更新后的前端数据
+        save_alerts_data(existing_alerts)
+        print(f"Updated frontend alerts data. Total records: {len(existing_alerts)}")
     else:
         print("No NEW anomalies found.")
-        # 心跳包逻辑保持不变，或者可以改为仅在没有新异常时发送简短日志
-        # 这里为了减少打扰，如果只是没有新异常，我们就不发 Discord 了，只在日志里打印
-        # 如果您希望保留心跳，可以取消下面注释
-        # heartbeat_embed = [{
-        #     "title": "💓 Monitor Heartbeat",
-        #     "description": f"Scanned {len(markets)} markets. No NEW whale orders > ${MIN_TRADE_SIZE} detected.",
-        #     "color": 3447003,
-        #     "footer": {"text": "System is running normally"},
-        #     "timestamp": datetime.utcnow().isoformat()
-        # }]
-        # send_discord_alert(heartbeat_embed)
 
     # 保存更新后的去重记录
     save_seen_orders(seen_orders)

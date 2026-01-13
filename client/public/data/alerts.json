@@ -1,0 +1,28 @@
+[
+  {
+    "id": "mock-1",
+    "time": "14:30:00",
+    "timestamp": "2023-10-27T14:30:00Z",
+    "type": "WHALE",
+    "message": "Whale Bid (Buy Wall) detected in 'Will Trump win 2024?' (Value: $150,000)",
+    "severity": "high",
+    "market_question": "Will Trump win 2024?",
+    "market_slug": "will-trump-win-2024",
+    "value": 150000,
+    "price": 0.45,
+    "size": 333333
+  },
+  {
+    "id": "mock-2",
+    "time": "14:15:22",
+    "timestamp": "2023-10-27T14:15:22Z",
+    "type": "WHALE",
+    "message": "Whale Ask (Sell Wall) detected in 'Fed Rate Cut in Nov?' (Value: $85,000)",
+    "severity": "medium",
+    "market_question": "Fed Rate Cut in Nov?",
+    "market_slug": "fed-rate-cut-nov",
+    "value": 85000,
+    "price": 0.88,
+    "size": 96590
+  }
+]

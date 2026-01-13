@@ -8,6 +8,9 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 赋予写权限以便提交代码
+      
     steps:
       - uses: actions/checkout@v3
       
@@ -44,3 +47,12 @@ jobs:
         with:
           path: seen_orders.json
           key: seen-orders-${{ github.run_id }}
+
+      # 3. 提交并推送更新后的数据文件 (用于前端展示)
+      - name: Commit and push alerts data
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add client/public/data/alerts.json
+          # 只有当文件有变化时才提交
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update alerts data [skip ci]" && git push)
