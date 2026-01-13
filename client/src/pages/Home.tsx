@@ -1,64 +1,29 @@
-import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
   TrendingUp, 
-  TrendingDown, 
   AlertTriangle, 
   Zap, 
   Activity,
   DollarSign,
   Users,
   Clock,
-  Search,
   Twitter,
   Globe,
   ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-// 定义警报数据接口
-interface AlertData {
-  id: string;
-  time: string;
-  timestamp: string;
-  type: string;
-  message: string;
-  severity: "low" | "medium" | "high" | "critical";
-  market_question: string;
-  market_slug: string;
-  value: number;
-  price: number;
-  size: number;
-}
+import { useEffect, useState } from "react";
 
 export default function Home() {
-  const [alerts, setAlerts] = useState<AlertData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [alerts, setAlerts] = useState<any[]>([]);
 
-  // 加载真实数据
   useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const response = await fetch('/data/alerts.json');
-        if (response.ok) {
-          const data = await response.json();
-          setAlerts(data);
-        } else {
-          console.error("Failed to fetch alerts data");
-        }
-      } catch (error) {
-        console.error("Error fetching alerts:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAlerts();
-    // 每 60 秒轮询一次
-    const interval = setInterval(fetchAlerts, 60000);
-    return () => clearInterval(interval);
+    fetch('/data/alerts.json')
+      .then(res => res.json())
+      .then(data => setAlerts(data))
+      .catch(err => console.error("Failed to load alerts:", err));
   }, []);
 
   return (
@@ -74,11 +39,11 @@ export default function Home() {
         />
         <StatCard 
           title="ACTIVE ANOMALIES" 
-          value={`${alerts.length} DETECTED`} 
-          change={alerts.length > 0 ? "NEW" : "0"} 
+          value="7 DETECTED" 
+          change="+2" 
           isPositive={false}
           icon={AlertTriangle}
-          alert={alerts.length > 0}
+          alert
         />
         <StatCard 
           title="INSIDER SIGNALS" 
@@ -151,24 +116,24 @@ export default function Home() {
               Recent Alerts
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+          <CardContent className="flex-1 overflow-y-auto pr-2 custom-scrollbar h-[400px]">
             <div className="space-y-3">
-              {loading ? (
-                <div className="text-center text-muted-foreground py-4 text-xs font-mono">Loading alerts...</div>
-              ) : alerts.length === 0 ? (
-                <div className="text-center text-muted-foreground py-4 text-xs font-mono">No active anomalies detected.</div>
-              ) : (
-                alerts.map((alert) => (
+              {alerts.length > 0 ? (
+                alerts.map((alert: any) => (
                   <AlertItem 
                     key={alert.id}
                     time={alert.time}
                     type={alert.type}
                     message={alert.message}
                     severity={alert.severity}
-                    marketQuestion={alert.market_question}
-                    marketSlug={alert.market_slug}
+                    market_question={alert.market_question}
+                    market_slug={alert.market_slug}
                   />
                 ))
+              ) : (
+                <div className="text-center text-muted-foreground py-10 text-xs font-mono">
+                  No anomalies detected yet...
+                </div>
               )}
             </div>
           </CardContent>
@@ -232,25 +197,25 @@ export default function Home() {
                 label="Pizza Watch" 
                 status="ONLINE" 
                 ping="24ms" 
-                url="https://www.google.com/search?q=bitcoin+pizza+day" 
+                link="https://polymarket.com" 
               />
               <StatusItem 
                 label="Polyfactual AI" 
                 status="PROCESSING" 
                 ping="112ms" 
-                url="https://polymarket.com" 
+                link="https://polymarket.com/markets" 
               />
               <StatusItem 
                 label="Hashdive" 
                 status="ONLINE" 
                 ping="45ms" 
-                url="https://www.google.com/search?q=blockchain+hashrate" 
+                link="https://polymarket.com/activity" 
               />
               <StatusItem 
                 label="Polysights" 
                 status="ONLINE" 
                 ping="32ms" 
-                url="https://polymarket.com/activity" 
+                link="https://polymarket.com/leaderboard" 
               />
             </div>
             
@@ -298,7 +263,7 @@ function StatCard({ title, value, change, isPositive, icon: Icon, alert = false 
   );
 }
 
-function AlertItem({ time, type, message, severity, marketQuestion, marketSlug }: any) {
+function AlertItem({ time, type, message, severity, market_question, market_slug }: any) {
   const severityMap = {
     low: "border-l-2 border-muted-foreground",
     medium: "border-l-2 border-yellow-500",
@@ -308,11 +273,8 @@ function AlertItem({ time, type, message, severity, marketQuestion, marketSlug }
   
   const severityColor = severityMap[severity as keyof typeof severityMap] || "border-l-2 border-muted-foreground";
 
-  // 使用 marketQuestion 作为搜索关键词，如果为空则回退到 message
-  const keyword = marketQuestion || message;
-  const twitterUrl = `https://twitter.com/search?q=${encodeURIComponent(keyword)}&src=typed_query`;
-  const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(keyword)}`;
-  const marketUrl = marketSlug ? `https://polymarket.com/event/${marketSlug}` : null;
+  // Extract keywords for search if market_question is not available
+  const searchKeywords = market_question || message.match(/'([^']+)'/)?.[1] || message;
 
   return (
     <div className={cn("p-3 bg-black/40 border border-border/50 hover:bg-white/5 transition-colors group", severityColor)}>
@@ -326,40 +288,54 @@ function AlertItem({ time, type, message, severity, marketQuestion, marketSlug }
         {message}
       </p>
       
-      {/* Search Actions - Only visible on hover or if critical */}
-      <div className="flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity flex-wrap">
-        {marketUrl && (
-          <a href={marketUrl} target="_blank" rel="noopener noreferrer" title="View on Polymarket">
-            <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] bg-primary/20 text-primary hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors border border-primary/30">
-              <ExternalLink className="w-3 h-3" />
-              Market
-            </Badge>
-          </a>
+      {/* Action Buttons */}
+      <div className="flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+        {market_slug && (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-6 text-[10px] px-2 border-primary/30 text-primary hover:bg-primary/10 hover:text-primary"
+            onClick={() => window.open(`https://polymarket.com/event/${market_slug}`, '_blank')}
+          >
+            <ExternalLink className="w-3 h-3 mr-1" />
+            Market
+          </Button>
         )}
-        <a href={twitterUrl} target="_blank" rel="noopener noreferrer" title="Search on Twitter">
-          <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors">
-            <Twitter className="w-3 h-3" />
-            Twitter
-          </Badge>
-        </a>
-        <a href={googleUrl} target="_blank" rel="noopener noreferrer" title="Search on Google">
-          <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors">
-            <Globe className="w-3 h-3" />
-            Google
-          </Badge>
-        </a>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="h-6 w-6 p-0 hover:bg-white/10"
+          onClick={() => window.open(`https://twitter.com/search?q=${encodeURIComponent(searchKeywords)}`, '_blank')}
+          title="Search on Twitter"
+        >
+          <Twitter className="w-3 h-3 text-muted-foreground hover:text-[#1DA1F2]" />
+        </Button>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="h-6 w-6 p-0 hover:bg-white/10"
+          onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(searchKeywords)}`, '_blank')}
+          title="Search on Google"
+        >
+          <Globe className="w-3 h-3 text-muted-foreground hover:text-white" />
+        </Button>
       </div>
     </div>
   );
 }
 
-function StatusItem({ label, status, ping, url }: any) {
-  const Content = () => (
-    <div className="flex items-center justify-between p-2 border-b border-border/50 last:border-0 hover:bg-white/5 transition-colors cursor-pointer">
-      <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-        {label}
-        {url && <ExternalLink className="w-3 h-3 opacity-50" />}
-      </span>
+function StatusItem({ label, status, ping, link }: any) {
+  return (
+    <a 
+      href={link} 
+      target="_blank" 
+      rel="noopener noreferrer"
+      className="flex items-center justify-between p-2 border-b border-border/50 last:border-0 hover:bg-white/5 transition-colors group cursor-pointer"
+    >
+      <div className="flex items-center gap-1">
+        <span className="text-xs font-mono text-muted-foreground group-hover:text-primary transition-colors">{label}</span>
+        <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-50 transition-opacity" />
+      </div>
       <div className="flex items-center gap-2">
         <span className={cn(
           "text-[10px] font-bold",
@@ -367,16 +343,6 @@ function StatusItem({ label, status, ping, url }: any) {
         )}>{status}</span>
         <span className="text-[10px] text-muted-foreground font-mono">[{ping}]</span>
       </div>
-    </div>
+    </a>
   );
-
-  if (url) {
-    return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
-        <Content />
-      </a>
-    );
-  }
-
-  return <Content />;
 }
