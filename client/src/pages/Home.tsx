@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -8,7 +9,10 @@ import {
   Activity,
   DollarSign,
   Users,
-  Clock
+  Clock,
+  Search,
+  Twitter,
+  Globe
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -253,17 +257,43 @@ function AlertItem({ time, type, message, severity }: any) {
   
   const severityColor = severityMap[severity as keyof typeof severityMap] || "border-l-2 border-muted-foreground";
 
+  // 提取关键词：尝试提取单引号中的内容，如果没有则使用整条消息
+  const extractKeyword = (msg: string) => {
+    const match = msg.match(/'([^']+)'/);
+    return match ? match[1] : msg;
+  };
+
+  const keyword = extractKeyword(message);
+  const twitterUrl = `https://twitter.com/search?q=${encodeURIComponent(keyword)}&src=typed_query`;
+  const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(keyword)}`;
+
   return (
-    <div className={cn("p-3 bg-black/40 border border-border/50 hover:bg-white/5 transition-colors", severityColor)}>
+    <div className={cn("p-3 bg-black/40 border border-border/50 hover:bg-white/5 transition-colors group", severityColor)}>
       <div className="flex items-center justify-between mb-1">
         <Badge variant="outline" className="text-[10px] h-4 px-1 font-mono border-border text-muted-foreground">
           {type}
         </Badge>
         <span className="text-[10px] font-mono text-muted-foreground">{time}</span>
       </div>
-      <p className="text-xs text-foreground leading-relaxed">
+      <p className="text-xs text-foreground leading-relaxed mb-2">
         {message}
       </p>
+      
+      {/* Search Actions - Only visible on hover or if critical */}
+      <div className="flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+        <a href={twitterUrl} target="_blank" rel="noopener noreferrer" title="Search on Twitter">
+          <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors">
+            <Twitter className="w-3 h-3" />
+            Twitter
+          </Badge>
+        </a>
+        <a href={googleUrl} target="_blank" rel="noopener noreferrer" title="Search on Google">
+          <Badge variant="secondary" className="h-5 px-1.5 gap-1 text-[10px] hover:bg-primary hover:text-primary-foreground cursor-pointer transition-colors">
+            <Globe className="w-3 h-3" />
+            Google
+          </Badge>
+        </a>
+      </div>
     </div>
   );
 }

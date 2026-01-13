@@ -1,7 +1,9 @@
 import os
 import json
 import time
+import hashlib
 import requests
+import urllib.parse
 from datetime import datetime, timedelta
 
 # 配置
@@ -10,7 +12,36 @@ CLOB_API_URL = "https://clob.polymarket.com"
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 MIN_TRADE_SIZE = 5000  # 最小监控金额 (USD)
-LOOKBACK_MINUTES = 15  # 扫描过去多少分钟的数据
+SEEN_ORDERS_FILE = "seen_orders.json"
+
+def load_seen_orders():
+    """加载已处理过的订单记录"""
+    if os.path.exists(SEEN_ORDERS_FILE):
+        try:
+            with open(SEEN_ORDERS_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading seen orders: {e}")
+    return {}
+
+def save_seen_orders(seen_orders):
+    """保存已处理过的订单记录"""
+    try:
+        with open(SEEN_ORDERS_FILE, 'w') as f:
+            json.dump(seen_orders, f)
+    except Exception as e:
+        print(f"Error saving seen orders: {e}")
+
+def clean_old_orders(seen_orders):
+    """清理超过 24 小时的旧记录"""
+    cutoff_time = (datetime.utcnow() - timedelta(hours=24)).timestamp()
+    cleaned = {k: v for k, v in seen_orders.items() if v > cutoff_time}
+    return cleaned
+
+def generate_order_id(market_id, price, size, side):
+    """生成唯一的订单 ID"""
+    raw_str = f"{market_id}-{price}-{size}-{side}"
+    return hashlib.md5(raw_str.encode()).hexdigest()
 
 def send_discord_alert(embeds):
     """发送 Discord 警报"""
@@ -65,7 +96,7 @@ def get_top_markets():
         print(f"Exception fetching markets: {e}")
         return []
 
-def check_whale_orders(market):
+def check_whale_orders(market, seen_orders):
     """检测巨鲸挂单"""
     url = f"{CLOB_API_URL}/book"
     params = {"token_id": market['id']}
@@ -74,7 +105,7 @@ def check_whale_orders(market):
         response = requests.get(url, params=params)
         if response.status_code == 200:
             book = response.json()
-            anomalies = []
+            new_anomalies = []
             
             # 检查买单 (Bids)
             for bid in book.get('bids', []):
@@ -82,13 +113,16 @@ def check_whale_orders(market):
                 size = float(bid['size'])
                 value = price * size
                 if value > MIN_TRADE_SIZE:
-                    anomalies.append({
-                        "type": "Whale Bid (Buy Wall)",
-                        "price": price,
-                        "size": size,
-                        "value": value,
-                        "side": "YES" # 简化假设
-                    })
+                    order_id = generate_order_id(market['id'], price, size, "BID")
+                    if order_id not in seen_orders:
+                        new_anomalies.append({
+                            "type": "Whale Bid (Buy Wall)",
+                            "price": price,
+                            "size": size,
+                            "value": value,
+                            "side": "YES",
+                            "order_id": order_id
+                        })
             
             # 检查卖单 (Asks)
             for ask in book.get('asks', []):
@@ -96,15 +130,18 @@ def check_whale_orders(market):
                 size = float(ask['size'])
                 value = price * size
                 if value > MIN_TRADE_SIZE:
-                    anomalies.append({
-                        "type": "Whale Ask (Sell Wall)",
-                        "price": price,
-                        "size": size,
-                        "value": value,
-                        "side": "YES" # 简化假设
-                    })
+                    order_id = generate_order_id(market['id'], price, size, "ASK")
+                    if order_id not in seen_orders:
+                        new_anomalies.append({
+                            "type": "Whale Ask (Sell Wall)",
+                            "price": price,
+                            "size": size,
+                            "value": value,
+                            "side": "YES",
+                            "order_id": order_id
+                        })
             
-            return anomalies
+            return new_anomalies
     except Exception as e:
         print(f"Error checking order book for {market['question']}: {e}")
     return []
@@ -112,46 +149,72 @@ def check_whale_orders(market):
 def scan_markets():
     """扫描市场异动"""
     print(f"Scanning top markets for anomalies...")
+    
+    # 加载去重记录
+    seen_orders = load_seen_orders()
+    seen_orders = clean_old_orders(seen_orders) # 清理旧数据
+    
     markets = get_top_markets()
     all_anomalies = []
+    new_seen_count = 0
     
     print(f"Found {len(markets)} markets to scan.")
     
     for market in markets:
         print(f"Checking: {market['question'][:30]}...")
-        anomalies = check_whale_orders(market)
+        anomalies = check_whale_orders(market, seen_orders)
         
         for anomaly in anomalies:
+            # 生成搜索链接
+            query = urllib.parse.quote(market['question'])
+            twitter_url = f"https://twitter.com/search?q={query}&src=typed_query"
+            google_url = f"https://www.google.com/search?q={query}"
+            
             embed = {
                 "title": f"🚨 {anomaly['type']} Detected!",
-                "description": f"**Market:** [{market['question']}](https://polymarket.com/event/{market['slug']})\n**Value:** ${anomaly['value']:,.2f}\n**Price:** {anomaly['price']}\n**Size:** {anomaly['size']:,.0f}",
+                "description": (
+                    f"**Market:** [{market['question']}](https://polymarket.com/event/{market['slug']})\n"
+                    f"**Value:** ${anomaly['value']:,.2f}\n"
+                    f"**Price:** {anomaly['price']}\n"
+                    f"**Size:** {anomaly['size']:,.0f}\n\n"
+                    f"🔍 **Search:** [Twitter]({twitter_url}) | [Google]({google_url})"
+                ),
                 "color": 16711680 if "Ask" in anomaly['type'] else 65280, # Red for Ask, Green for Bid
                 "footer": {"text": "Polymarket Anomaly Monitor"},
                 "timestamp": datetime.utcnow().isoformat()
             }
             all_anomalies.append(embed)
             
+            # 记录到 seen_orders，值为当前时间戳
+            seen_orders[anomaly['order_id']] = datetime.utcnow().timestamp()
+            new_seen_count += 1
+            
         # 避免 API 速率限制
         time.sleep(0.2)
         
     if all_anomalies:
-        print(f"Found {len(all_anomalies)} anomalies. Sending alerts...")
+        print(f"Found {len(all_anomalies)} NEW anomalies. Sending alerts...")
         # 分批发送，避免 Discord 限制
         for i in range(0, len(all_anomalies), 10):
             batch = all_anomalies[i:i+10]
             send_discord_alert(batch)
     else:
-        print("No anomalies found.")
-        # 发送心跳包 (可选，每天发送一次或每次都发)
-        # 这里设置为每次都发，以便用户确认脚本在运行
-        heartbeat_embed = [{
-            "title": "💓 Monitor Heartbeat",
-            "description": f"Scanned {len(markets)} markets. No whale orders > ${MIN_TRADE_SIZE} detected.",
-            "color": 3447003, # Blue
-            "footer": {"text": "System is running normally"},
-            "timestamp": datetime.utcnow().isoformat()
-        }]
-        send_discord_alert(heartbeat_embed)
+        print("No NEW anomalies found.")
+        # 心跳包逻辑保持不变，或者可以改为仅在没有新异常时发送简短日志
+        # 这里为了减少打扰，如果只是没有新异常，我们就不发 Discord 了，只在日志里打印
+        # 如果您希望保留心跳，可以取消下面注释
+        # heartbeat_embed = [{
+        #     "title": "💓 Monitor Heartbeat",
+        #     "description": f"Scanned {len(markets)} markets. No NEW whale orders > ${MIN_TRADE_SIZE} detected.",
+        #     "color": 3447003,
+        #     "footer": {"text": "System is running normally"},
+        #     "timestamp": datetime.utcnow().isoformat()
+        # }]
+        # send_discord_alert(heartbeat_embed)
+
+    # 保存更新后的去重记录
+    save_seen_orders(seen_orders)
+    print(f"Updated seen orders cache. Total tracked: {len(seen_orders)}")
 
 if __name__ == "__main__":
     scan_markets()
