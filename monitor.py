@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 # Configuration
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-POLYMARKET_GRAPHQL_URL = "https://gamma-api.polymarket.com/query"
+POLYMARKET_EVENTS_URL = "https://gamma-api.polymarket.com/events"
 CLOB_API_URL = "https://clob.polymarket.com/book"
 THRESHOLD_USD = 5000  # Alert for orders > $5,000
 SEEN_ORDERS_FILE = "seen_orders.json"
@@ -25,7 +25,8 @@ def load_seen_orders():
 def save_seen_orders(seen_orders):
     # Clean up old orders (> 24 hours)
     cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
-    cleaned_orders = {k: v for k, v in seen_orders.items() if v > cutoff}
+    # Ensure v is a string before comparison to avoid TypeError
+    cleaned_orders = {k: v for k, v in seen_orders.items() if str(v) > cutoff}
     
     with open(SEEN_ORDERS_FILE, "w") as f:
         json.dump(cleaned_orders, f)
@@ -53,23 +54,39 @@ def save_alerts_data(new_alert):
         json.dump(alerts, f, indent=2)
 
 def get_top_markets():
-    query = """
-    query {
-      markets(first: 50, orderBy: volume24hr, orderDirection: desc) {
-        id
-        question
-        slug
-        tokens {
-          tokenId
-          outcomeLabel
-        }
-      }
+    params = {
+        "limit": 20,
+        "closed": "false",
+        "order": "volume24hr",
+        "ascending": "false"
     }
-    """
     try:
-        response = requests.post(POLYMARKET_GRAPHQL_URL, json={"query": query})
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        # Retry up to 3 times
+        for attempt in range(3):
+            try:
+                response = requests.get(POLYMARKET_EVENTS_URL, params=params, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException as e:
+                if attempt == 2:
+                    raise e
+                time.sleep(1)
+        
         if response.status_code == 200:
-            return response.json().get("data", {}).get("markets", [])
+            events = response.json()
+            markets = []
+            for event in events:
+                # Extract markets from event
+                event_markets = event.get("markets", [])
+                for market in event_markets:
+                    # Add event slug if market slug is missing
+                    if "slug" not in market:
+                        market["slug"] = event.get("slug", "")
+                    markets.append(market)
+            return markets
         else:
             print(f"Error fetching markets: {response.status_code}")
             return []
@@ -82,10 +99,20 @@ def check_order_book(market):
     question = market["question"]
     slug = market.get("slug", "") # Get slug safely
     
+    # Parse clobTokenIds and outcomes
+    try:
+        clob_token_ids = json.loads(market.get("clobTokenIds", "[]"))
+        outcomes = json.loads(market.get("outcomes", "[]"))
+    except Exception as e:
+        print(f"Error parsing tokens for market {market_id}: {e}")
+        return
+
     # Check each token (outcome) in the market
-    for token in market["tokens"]:
-        token_id = token["tokenId"]
-        outcome = token["outcomeLabel"]
+    for i, token_id in enumerate(clob_token_ids):
+        if i < len(outcomes):
+            outcome = outcomes[i]
+        else:
+            outcome = "Unknown"
         
         try:
             # Fetch Order Book
