@@ -190,7 +190,8 @@ def send_alert(market_id, question, slug, outcome, side, price, size, value):
             }]
         }
         try:
-            requests.post(DISCORD_WEBHOOK_URL, json=payload)
+            #requests.post(DISCORD_WEBHOOK_URL, json=payload)
+            pass
         except Exception as e:
             print(f"Failed to send Discord alert: {e}")
 
