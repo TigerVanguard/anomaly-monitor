@@ -8,12 +8,12 @@ ALERTS_DATA_FILE = "client/public/data/alerts.json"
 
 MARKETS = [
     {"question": "Will Trump win the 2024 Election?", "slug": "presidential-election-winner-2024"},
-    {"question": "Fed to cut rates in March 2025?", "slug": "fed-rate-march-2025"},
-    {"question": "Bitcoin to hit $100k before 2025?", "slug": "bitcoin-price-2025"},
-    {"question": "SpaceX Starship orbital launch success?", "slug": "spacex-starship-launch"},
-    {"question": "Will Taylor Swift endorse Biden?", "slug": "taylor-swift-endorsement"},
-    {"question": "GDP Growth > 3% in Q3?", "slug": "us-gdp-growth-q3"},
-    {"question": "Oil prices to exceed $90/barrel?", "slug": "oil-price-target-2024"},
+    {"question": "Fed to cut rates in March 2025?", "slug": None},
+    {"question": "Bitcoin to hit $100k before 2025?", "slug": None},
+    {"question": "SpaceX Starship orbital launch success?", "slug": None},
+    {"question": "Will Taylor Swift endorse Biden?", "slug": None},
+    {"question": "GDP Growth > 3% in Q3?", "slug": None},
+    {"question": "Oil prices to exceed $90/barrel?", "slug": None},
 ]
 
 def generate_random_alert(index, market):
